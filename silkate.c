@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define MAX_TOKENS 100
+
 typedef enum
 {
     TOKEN_IDENIFIER,
@@ -44,14 +46,17 @@ void setstrchar(char *__restrict__ _str, char _chr)
     _str[1] = '\0';
 }
 
-int tokenize(const char *source)
+int tokenize(const char *source, Token *tokens)
 {
-    Token tokens[50];
     int tokenCount = 0;
     
     int i = 0;
     while (source[i] != '\0')
     {
+        if (tokenCount >= MAX_TOKENS) {
+            printf("silkate: too many tokens\n");
+            return -1;
+        }
         if (source[i] == '\n')
         {
             tokens[tokenCount].type = TOKEN_NEWLINE;
@@ -75,7 +80,6 @@ int tokenize(const char *source)
             strncpy(tokens[tokenCount].value,source + start,n);
             tokens[tokenCount].value[n] = '\0';
             tokenCount++;
-            i++;
         }
         else if (source[i] == '+')
         {
@@ -101,7 +105,7 @@ int tokenize(const char *source)
         else if (source[i] == '/')
         {
             tokens[tokenCount].type = TOKEN_SLASH;
-            setstrchar(tokens[tokenCount].value,'+');
+            setstrchar(tokens[tokenCount].value,'/');
             tokenCount++;
             i++;
         }
@@ -166,6 +170,7 @@ int tokenize(const char *source)
             int n = i - start;
             char lexeme[64];
             strncpy(lexeme,source + start,n);
+            lexeme[n] = '\0';
             if (!strcmp(lexeme,"int")) {
                 tokens[tokenCount].type = TOKEN_INT;
                 strcpy(tokens[tokenCount].value,lexeme);
@@ -203,7 +208,7 @@ int tokenize(const char *source)
             if (source[i] == '\0')
             {
                 printf("silkate: unclosed string starting at char #%d", start);
-                return 0;
+                return -1;
             }
             int n = i - start;
             tokens[tokenCount].type = TOKEN_STRING;
@@ -215,14 +220,14 @@ int tokenize(const char *source)
         else
         {
             printf("silkate: unexpected token: %c", source[i]);
-            return 0;
+            return -1;
         }
     }
     for (int j = 0; j < tokenCount; j++)
     {
         printf("Token #%d: Type: %d | Value: %s\n", j + 1, tokens[j].type, tokens[j].value);
     }
-    return 1;
+    return tokenCount;
 }
 
 int main(int argc, char const *argv[])
@@ -254,8 +259,15 @@ int main(int argc, char const *argv[])
     source[size] = '\0';
 
     fclose(file);
+    
+    Token tokens[MAX_TOKENS];
 
-    tokenize(source);
+    int tokenCount = tokenize(source,tokens);
+    
+    if (tokenCount == -1)
+    {
+        return 1;
+    }
 
     free(source);
 
