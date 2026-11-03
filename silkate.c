@@ -6,7 +6,7 @@
 
 typedef enum
 {
-    TOKEN_IDENIFIER,
+    TOKEN_IDENTIFIER,
     TOKEN_INTEGER,
     TOKEN_STRING,
 
@@ -39,6 +39,77 @@ typedef struct
     TokenType type;
     char value[64];
 } Token;
+
+typedef enum
+{
+    AST_PROGRAM,
+    AST_INTEGER,
+    AST_IDENTIFIER,
+    AST_BINARY,
+    AST_DECLARATION
+} ASTType;
+
+typedef struct AST AST;
+
+struct AST
+{
+    ASTType type;
+
+    union
+    {
+        struct
+        {
+            AST **statements;
+            int statementCount;
+        } program;
+
+        int integer;
+
+        char identifier[64];
+
+        struct
+        {
+            AST *left;
+            AST *right;
+            TokenType operator;
+        } binary;
+
+        struct
+        {
+            char name[64];
+            AST *value;
+        } declaration;
+    };
+};
+typedef struct
+{
+    Token *tokens;
+    int count;
+    int current;
+} Parser;
+
+Token *peek(Parser *parser)
+{
+    return &parser->tokens[parser->current];
+}
+Token *advance(Parser *parser)
+{
+    return &parser->tokens[parser->current++];
+}
+
+void add_statement(AST *program, AST *statement)
+{
+    int count = program->program.statementCount;
+
+    program->program.statements =
+        realloc(
+            program->program.statements,
+            sizeof(AST *) * (count + 1)
+        );
+
+    program->program.statements[count] = statement;
+    program->program.statementCount++;
+}
 
 void setstrchar(char *__restrict__ _str, char _chr)
 {
@@ -192,7 +263,7 @@ int tokenize(const char *source, Token *tokens)
                 strcpy(tokens[tokenCount].value,lexeme);
             }
             else {
-                tokens[tokenCount].type = TOKEN_IDENIFIER;
+                tokens[tokenCount].type = TOKEN_IDENTIFIER;
                 strcpy(tokens[tokenCount].value,lexeme);
             }
             tokenCount++;
@@ -228,6 +299,235 @@ int tokenize(const char *source, Token *tokens)
         printf("Token #%d: Type: %d | Value: %s\n", j + 1, tokens[j].type, tokens[j].value);
     }
     return tokenCount;
+}
+
+const char *operator_string(TokenType type)
+{
+    switch (type)
+    {
+        case TOKEN_PLUS:         return "+";
+        case TOKEN_MINUS:        return "-";
+        case TOKEN_STAR:         return "*";
+        case TOKEN_SLASH:        return "/";
+        case TOKEN_EQUAL_EQUAL:  return "==";
+        case TOKEN_NOT_EQUAL:    return "~=";
+        default:                 return "?";
+    }
+}
+
+AST *parse_expression(Parser *parser)
+{
+    Token *token = peek(parser);
+
+    if (token->type != TOKEN_INTEGER)
+    {
+        printf("silkate: expected expression\n");
+        return NULL;
+    }
+
+    AST *left = malloc(sizeof(AST));
+
+    if (left == NULL)
+    {
+        return NULL;
+    }
+
+    left->type = AST_INTEGER;
+    left->integer = atoi(token->value);
+
+    advance(parser);
+
+    while (peek(parser)->type == TOKEN_PLUS)
+    {
+        TokenType operator = peek(parser)->type;
+        advance(parser);
+
+        token = peek(parser);
+
+        if (token->type != TOKEN_INTEGER)
+        {
+            printf("silkate: expected integer after '+'\n");
+            free(left);
+            return NULL;
+        }
+
+        AST *right = malloc(sizeof(AST));
+
+        if (right == NULL)
+        {
+            free(left);
+            return NULL;
+        }
+
+        right->type = AST_INTEGER;
+        right->integer = atoi(token->value);
+
+        advance(parser);
+
+        AST *binary = malloc(sizeof(AST));
+
+        if (binary == NULL)
+        {
+            free(left);
+            free(right);
+            return NULL;
+        }
+
+        binary->type = AST_BINARY;
+        binary->binary.left = left;
+        binary->binary.right = right;
+        binary->binary.operator = operator;
+
+        left = binary;
+    }
+
+    return left;
+}
+
+AST *parse_declaration(Parser *parser)
+{
+    AST *declaration = malloc(sizeof(AST));
+
+    if (declaration == NULL)
+    {
+        return NULL;
+    }
+
+    declaration->type = AST_DECLARATION;
+
+    // Skip the "int"
+    advance(parser);
+
+    // We should now be looking at the identifier
+    Token *name = peek(parser);
+
+    if (name->type != TOKEN_IDENTIFIER)
+    {
+        printf("silkate: expected identifier after 'int'\n");
+        free(declaration);
+        return NULL;
+    }
+
+    strcpy(declaration->declaration.name, name->value);
+    advance(parser);
+
+    // We should now have '='
+    if (peek(parser)->type != TOKEN_EQUAL)
+    {
+        printf("silkate: expected '=' after identifier\n");
+        free(declaration);
+        return NULL;
+    }
+
+    advance(parser);
+
+    // For now, only allow an integer as the value
+    AST *value = parse_expression(parser);
+
+    if (value == NULL)
+    {
+        free(declaration);
+        return NULL;
+    }
+
+    declaration->declaration.value = value;
+
+    advance(parser);
+
+    return declaration;
+}
+
+AST *parse_statement(Parser *parser)
+{
+    Token *token = &parser->tokens[parser->current];
+
+    if (token->type == TOKEN_INT)
+    {
+        return parse_declaration(parser);
+    }
+
+    return NULL;
+}
+
+AST *parse(Parser *parser)
+{
+    AST *program = malloc(sizeof(AST));
+
+    if (program == NULL)
+    {
+        return NULL;
+    }
+
+    program->type = AST_PROGRAM;
+    program->program.statements = NULL;
+    program->program.statementCount = 0;
+
+    while (parser->current < parser->count)
+    {
+        Token *token = peek(parser);
+
+        if (token->type == TOKEN_NEWLINE)
+        {
+            advance(parser);
+            continue;
+        }
+
+        AST *statement = parse_statement(parser);
+
+        if (statement == NULL)
+        {
+            free(program);
+            return NULL;
+        }
+
+        add_statement(program, statement);
+    }
+
+    return program;
+}
+
+void print_ast(AST *node, int indent)
+{
+    if (node == NULL)
+    {
+        return;
+    }
+
+    for (int i = 0; i < indent; i++)
+    {
+        printf("\t");
+    }
+
+    switch (node->type)
+    {
+        case AST_PROGRAM:
+            printf("PROGRAM\n");
+
+            for (int i = 0; i < node->program.statementCount; i++)
+            {
+                print_ast(node->program.statements[i], indent + 1);
+            }
+            break;
+
+        case AST_DECLARATION:
+            printf("DECLARATION: %s\n", node->declaration.name);
+            print_ast(node->declaration.value, indent + 1);
+            break;
+
+        case AST_INTEGER:
+            printf("INTEGER: %d\n", node->integer);
+            break;
+
+        case AST_IDENTIFIER:
+            printf("IDENTIFIER: %s\n", node->identifier);
+            break;
+
+        case AST_BINARY:
+            printf("BINARY: %s\n", operator_string(node->binary.operator));
+            print_ast(node->binary.left, indent + 1);
+            print_ast(node->binary.right, indent + 1);
+            break;
+    }
 }
 
 int main(int argc, char const *argv[])
@@ -270,6 +570,16 @@ int main(int argc, char const *argv[])
     }
 
     free(source);
+
+    Parser parser;
+
+    parser.tokens = tokens;
+    parser.count = tokenCount;
+    parser.current = 0;
+
+    AST *program = parse(&parser);
+
+    print_ast(program,0);
 
     return 0;
 }
